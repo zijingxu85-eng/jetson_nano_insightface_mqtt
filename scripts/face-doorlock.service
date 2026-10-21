@@ -1,0 +1,26 @@
+[Unit]
+Description=Jetson Nano Face Recognition DoorLock System
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=xinghuo
+WorkingDirectory=/home/xinghuo/jetson_python3.8
+Environment="DISPLAY=:0"
+Environment="XAUTHORITY=/home/xinghuo/.Xauthority"
+Environment="LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libgomp.so.1"
+
+ExecStart=/home/xinghuo/jetson_python3.8/venv38/bin/python3 \
+    /home/xinghuo/jetson_python3.8/face_recognition_doorlock.py
+
+# 崩溃后自动重启
+Restart=on-failure
+RestartSec=10
+
+# 日志
+StandardOutput=append:/home/xinghuo/jetson_python3.8/logs/doorlock.log
+StandardError=append:/home/xinghuo/jetson_python3.8/logs/doorlock_error.log
+
+[Install]
+WantedBy=multi-user.target
