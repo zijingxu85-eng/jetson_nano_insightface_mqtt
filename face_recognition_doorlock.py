@@ -528,7 +528,7 @@ class FaceDoorLock:
             elif s > bs2:
                 bs2 = s
         # Must pass threshold AND have clear margin over second best
-        if bs > (1.0 - THRESHOLD) and (bs - bs2) > 0.03:
+        if bs > (1.0 - THRESHOLD) and (bs - bs2) > C.MARGIN:
             return bn, bs
         return None, bs
 
