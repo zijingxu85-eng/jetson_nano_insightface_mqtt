@@ -20,6 +20,8 @@ import subprocess
 import traceback
 from pathlib import Path
 
+from liveness_judge import LivenessJudge
+
 # ====== Config（参数集中在 config.py，私钥放在 local_secrets.py 或环境变量）======
 import config as C
 
@@ -446,6 +448,10 @@ class FaceDoorLock:
         self._recognized_time = 0
         self._tracker = FaceTracker()
         self._detector = DetectorThread(self)
+        self._live = LivenessJudge(gap=C.RHO_GAP, window=C.RHO_WINDOW,
+                                   rho_min=C.RHO_MIN, corners=C.RHO_CORNERS)
+        self._last_spoof = 0.0
+        self._last_wait = 0.0
 
     def load_known_faces(self):
         """Load known face DB using CPU embeddings (ONNX) — with cache support"""
@@ -583,6 +589,10 @@ class FaceDoorLock:
                 tracked_bbox = self._tracker.update(frame)
                 has_track = tracked_bbox is not None
 
+                # 活体判据：每帧更新（需要 ~1s 基线 + 6 帧窗口）
+                live_state = self._live.update(
+                    cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), tracked_bbox)
+
                 # Latest detection result
                 fi = self._last_face
                 face_is_recent = fi is not None and (time.time() - fi["time"]) < MAX_FACE_AGE
@@ -611,10 +621,19 @@ class FaceDoorLock:
                     cv2.putText(frame, "Tracking",
                                 (b[0], b[1] - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 100, 100), 1)
 
-                # Door trigger on new recognition
+                # Door trigger：必须身份通过 + 活体通过
                 if rec:
                     now = time.time()
-                    if now - self.last_send > SEND_COOLDOWN and not self.send_q.full():
+                    if live_state == "SPOOF":
+                        if now - self._last_spoof > 5.0:
+                            print("[LIVE] SPOOF  rho_bar=%.4f < %.3f  拒绝开门"
+                                  % (self._live.rho_bar or 0.0, C.RHO_MIN), flush=True)
+                            self._last_spoof = now
+                    elif live_state != "OK":
+                        if now - self._last_wait > 3.0:
+                            print("[LIVE] %s (%s)  等待活体判决" % (live_state, self._live.info), flush=True)
+                            self._last_wait = now
+                    if live_state == "OK" and now - self.last_send > SEND_COOLDOWN and not self.send_q.full():
                         self.send_q.put((frame.copy(), rec))
                         self.last_send = now
                         self._recognized_name = rec
@@ -724,6 +743,14 @@ class FaceDoorLock:
             s = "Monitoring"
             c = (180, 180, 180)
         cv2.putText(frame, s, (w - 260, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, c, 1)
+
+        # 活体状态（第二行，位于顶栏下方）
+        lv = self._live.label()
+        lc = {"LIVE": (0, 255, 0), "SPOOF": (0, 0, 255),
+              "INVALID": (0, 165, 255), "WARMUP": (180, 180, 180)}.get(lv, (180, 180, 180))
+        rb = self._live.rho_bar
+        cv2.putText(frame, "PAD:%s %s" % (lv, "" if rb is None else "rho=%.3f" % rb),
+                    (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.55, lc, 2)
 
         gs = "GPU:ON" if self.gpu_rec.ready else "GPU:OFF"
         gc = (0, 255, 0) if self.gpu_rec.ready else (0, 0, 255)

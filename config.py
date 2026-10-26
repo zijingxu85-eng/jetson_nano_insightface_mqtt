@@ -42,7 +42,8 @@ SEND_COOLDOWN = 5.0
 TRACK_MAX_FEAT = 15
 TRACK_QUALITY = 0.02
 
-# ---- 活体判据（方案 B，可选模块使用）----
-RHO_MIN = 0.032
-RHO_WINDOW = 10
+# ---- 活体判据（实测标定：照片 0.0069 / 真人 0.0464 / 6.7 倍分离）----
+RHO_MIN = 0.024
+RHO_GAP = 12
+RHO_WINDOW = 6
 RHO_CORNERS = 60

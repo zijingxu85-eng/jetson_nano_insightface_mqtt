@@ -13,7 +13,9 @@
 - **三级节流**：5 s 冷却 + 有界队列（≤5）+ 异步发送线程，避免重复开锁与网络阻塞
 - **零依赖 MQTT**：用标准库 socket 手写 MQTT 3.1.1 最小子集（CONNECT / PUBLISH / PINGREQ / DISCONNECT）
 - **抓拍上传**：开门事件同时把画面以 multipart/form-data 上传云端，失败不影响开锁
-- **可选的活体通道**（`liveness/`）：单应残差比 ρ 与余弦构成二维判决，用于拦截照片攻击
+- **活体判据已接入主流程**：单应残差比 ρ（1 s 基线 + 6 帧中位）与余弦构成二维判决。
+  实测（640×480，GAP=12）：照片 ρ=0.0069、真人 ρ=0.0464，**6.7 倍分离**；阈值 0.024，
+  单帧错误 12.6%，6 帧中位后 <0.5%
 
 ## 目录结构
 
@@ -23,7 +25,8 @@
 ├── collect_faces.py               # 人脸库采集工具（目录名即标签）
 ├── config.py                      # 所有可调参数
 ├── local_secrets.example.py       # 私钥模板（复制为 local_secrets.py）
-├── liveness/                      # 活体实验脚本（方案 B）
+├── liveness_judge.py              # 活体判决模块（ρ + 时间窗 + 三态）
+├── liveness/                      # 活体实验与标定脚本（方案 B）
 │   ├── collect_rho_video.py       # 采集 ρ 的时间序列
 │   ├── run_liveness_session.py    # 引导式采集（屏幕提示 真人/照片）
 │   ├── camera_aim.py              # 取景辅助
@@ -98,11 +101,13 @@ cd /path/to/project
 | `MAX_FACE_AGE` | 3.0 | 识别结果有效期（秒） |
 | `SEND_COOLDOWN` | 5.0 | 开门冷却（秒） |
 | `TRACK_MAX_FEAT` | 15 | 光流跟踪角点数 |
-| `RHO_MIN` | 0.032 | 活体判据阈值（方案 B） |
+| `RHO_MIN` | 0.024 | 活体判据阈值（实测标定） |
+| `RHO_GAP` | 12 | ρ 的比较间隔（帧，约 1 s） |
+| `RHO_WINDOW` | 6 | 时间窗中位帧数 |
 
 ## 已知限制
 
-1. 当前无活体检测（`liveness/` 为实验代码，尚未接入主循环），静态照片可骗过
+1. 活体判据对**屏幕视频回放**无效（画面内有真实三维运动）；真人完全静止时输出 `INVALID`，需提示微动
 2. 单人库时二次门限失效（次优分数恒为 −1）
 3. USB 摄像头供电不稳时会被内核重新枚举（`/dev/video0` 可能变成 `/dev/video1`）
 4. TensorRT FP16 推理在 TRT 8.2 上得到的特征与 CPU 不一致，当前统一使用 CPU 推理
