@@ -452,6 +452,12 @@ class FaceDoorLock:
                                    rho_min=C.RHO_MIN, corners=C.RHO_CORNERS)
         self._last_spoof = 0.0
         self._last_wait = 0.0
+        # 开门提示（由发送线程写入，主线程绘制）
+        self._door_flash = 0.0
+        self._door_msg = ""
+        self._door_color = (0, 255, 0)
+        self._door_count = 0
+        self._door_fail = 0
 
     def load_known_faces(self):
         """Load known face DB using CPU embeddings (ONNX) — with cache support"""
@@ -694,11 +700,21 @@ class FaceDoorLock:
                 self.mqtt.heartbeat()
                 continue
             try:
-                self.mqtt.publish(DOOR_TOPIC, "off")
+                ok = self.mqtt.publish(DOOR_TOPIC, "off")
+                if not ok:
+                    raise RuntimeError("publish failed")
                 print("[DOOR] %s" % name, flush=True)
+                self._door_count += 1
+                self._door_msg = "DOOR OPEN  #%d" % self._door_count
+                self._door_color = (0, 255, 0)
+                self._door_flash = time.time() + 2.5
                 self._send_pic(frame)
             except Exception as e:
                 print("[SEND] Error: %s" % e, flush=True)
+                self._door_fail += 1
+                self._door_msg = "DOOR FAIL"
+                self._door_color = (0, 0, 255)
+                self._door_flash = time.time() + 2.5
             self.send_q.task_done()
 
     def _send_pic(self, frame):
@@ -752,6 +768,13 @@ class FaceDoorLock:
         cv2.putText(frame, "PAD:%s %s" % (lv, "" if rb is None else "rho=%.3f" % rb),
                     (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.55, lc, 2)
 
+        # 开门提示：中央大字，显示 2.5 秒
+        if time.time() < self._door_flash:
+            txt = self._door_msg
+            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 1.1, 3)
+            cv2.putText(frame, txt, ((w - tw) // 2, h // 2 + th // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.1, self._door_color, 3)
+
         gs = "GPU:ON" if self.gpu_rec.ready else "GPU:OFF"
         gc = (0, 255, 0) if self.gpu_rec.ready else (0, 0, 255)
         cv2.putText(frame, gs, (w - 120, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, gc, 1)
@@ -759,6 +782,8 @@ class FaceDoorLock:
         mqc = "MQTT:ON" if self.mqtt.connected else "MQTT:OFF"
         mcc = (0, 255, 0) if self.mqtt.connected else (0, 0, 255)
         cv2.putText(frame, mqc, (8, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, mcc, 1)
+        cv2.putText(frame, "DOOR:%d FAIL:%d" % (self._door_count, self._door_fail),
+                    (w // 2 - 40, h - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
         cv2.putText(frame, "q=quit r=reload", (w - 140, h - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 128, 128), 1)
 
